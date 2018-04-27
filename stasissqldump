@@ -1,0 +1,82 @@
+#!/bin/bash -u
+
+# Check_mk plugin for stasis_sql_dump
+# GPL (C) Lars Falk-Petersen <dev@falk-petersen.no>, 2014
+#
+# Check if a database server is running,
+# and if so check that we have a valid backup.
+
+configpath='/local/etc/stasis_sql_dump.conf'
+errorlogpath='/local/var/stasis_sql_dump_errors.log'
+backuppath='/var/backup/mysql/'
+
+# Default values, values that fail validation
+# Errorlog exit codes:
+#   0 = No databases
+#  -1 = No config
+#  -2 = No errorlog set
+errorlog=-1
+backupsize=-1
+backupfresh=-1
+dbserver='Unchecked'
+
+#TODO: Find configpath(s) from cron.
+#TODO: Consider counding number of databases and compare with backup.
+
+# Check if a db-server is running.
+# The x's are not a bug, see http://www.tldp.org/LDP/abs/html/comparison-ops.html
+mysql=$( pidof mysqld )
+pgsql=$( pgrep post )
+if [ "x" == "x${mysql}" ] && [ "x" == "x${pgsql}" ]
+then
+  dbserver=''
+  errors=0
+else
+  dbserver=''
+  [[ "" != "${mysql}" ]] && dbserver='Mysql running. '
+  [[ "" != "${pgsql}" ]] && dbserver="${dbserver}Postgresql running. "
+
+  # Check config file
+  if [ -f ${configpath} ]
+  then
+    # Get paths from stasis_sql_backup config.
+    backuppath=$( egrep "^dir=" ${configpath} 2> /dev/null | cut -d'=' -f 2 )
+    errorlogpath=$( egrep "^error_log=" ${configpath} 2> /dev/null | cut -d'=' -f 2 )
+
+    # Check error log
+    if [ "" != "${errorlogpath}" ] && [ -f "${errorlogpath}" ]
+    then
+      errorlog=$( wc -l ${errorlogpath} 2> /dev/null  | cut -f1 -d' ' )
+    else
+      dbserver="${dbserver}Unable to locate error log (${errorlogpath}). Not set in config file?"
+      errors=-2
+    fi
+
+    # Check backup dir
+    [[ "" != "${backuppath}" ]] && \
+    {
+      #Check size of backup
+      backupsize=$( du -s ${backuppath} 2> /dev/null | cut -f1 )
+
+      #Check date of backup
+      backupfresh=$( find ${backuppath} -mtime -2 -type f -size +1k 2> /dev/null | wc -l );
+
+      # TODO: If no backup, check if there are any databases.
+      #[[ 100 -gt ${backupsize} ]] && \
+      # {
+        #Attempt to list out databases
+
+      #}
+
+    }
+
+  else
+    dbserver="${dbserver}Unable to locate config file (${configpath}). "
+  fi
+fi
+
+echo '<<<stasissqldump>>>'
+echo "errors ${errorlog}"
+echo "size ${backupsize}"
+echo "new ${backupfresh}"
+echo "dbserver ${dbserver}"
